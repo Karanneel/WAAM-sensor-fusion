@@ -1,148 +1,122 @@
-# Simulation Field
+# waam-sensor-fusion
 
-**At this operating point, under a fixed WAAM layer-to-layer height controller, estimator choice does not reach the final wall.**
+A simulation testbed for comparing sensor fusion strategies in wire-arc additive manufacturing (WAAM). Four estimators (naive baseline, extended Kalman filter, gradient-boosted learned model, oracle) are scored against known ground truth across planted process-model errors, generator variations, and scanner dropout, with all predictions registered before code was written.
 
-A simulated robotic wire-arc additive manufacturing (WAAM) wall testbed where every sensor fusion choice is scored against known truth. Four estimators (naive baseline, extended Kalman filter, gradient-boosted learned model, oracle) are compared across planted process-model errors, generator variations, and scanner dropouts, using a pre-registered gate from the start.
+## Why this exists
 
-## Status
+Sensor fusion papers in additive manufacturing typically report accuracy on one dataset with one model. There is no open testbed that holds the process physics, the estimators, and the controller in one loop and asks: does a better state estimate actually produce a better part?
 
-| Stop | Content | Status |
-|---|---|---|
-| 0 | PIONEER probe (real WAAM data) | GO |
-| A | Simulator, sensors, 3 estimators + oracle, controller, 3 sweeps (planted error, dropout, sealed) | Complete |
-| B | Observability (Gramian / Fisher information) + sensor-value Pareto front | Complete |
-| Later | Wire-laser DED module, powder DED module, parked items | See [docs/future-work.md](docs/future-work.md) |
+This project answers that question for a simulated WAAM single-bead wall. The simulator is calibrated against real WAAM data (PIONEER, Zenodo 17608626), and every finding is classified as structural or model-dependent using a sealed generator variant the estimators never saw during tuning.
 
-## Results & honest limits
+## What it found
 
-Three structural findings that survive the pre-registered sealed-variant check, the oracle floor comparison, and 20% scanner dropout.
+Three findings survive the sealed-variant check, the oracle floor, and 20% scanner dropout.
 
-### 1. Final wall-height error is estimator-invariant
+**1. Final wall error is estimator-invariant.** Oracle, EKF, learned and naive all produce 1.015 mm wall error. The fixed layer-to-layer controller absorbs estimator differences before they reach the part. At this operating point, estimator sophistication does not change the outcome.
 
-Oracle, EKF, learned and naive all produce **1.015 mm final wall error** across every planted-error cell. The fixed layer-to-layer controller absorbs estimator noise before it reaches the outcome. This is the strongest Q8 statement the project supports: at this operating point, estimator sophistication does not change the part.
+**2. EKF matches oracle at zero planted error.** On height and standoff RMSE, the EKF sits on the oracle floor (correct physics, correct nonlinear CTWD inversion). Physics-based fusion with correct parameters is already at the achievable limit.
 
-### 2. EKF matches oracle at zero error
+**3. Learned model fails under scanner dropout.** At 20% dropout, learned height RMSE is 6.8 mm versus EKF at 0.028 mm, a factor of 240x. The EKF propagates physics through blocked scans. The learned model, trained without consecutive dropout sequences, extrapolates into divergence.
 
-On H and standoff RMSE, the extended Kalman filter sits on the oracle line (correct physics, correct nonlinear CTWD inversion) at zero planted error. Fusion with correct physics is already at the achievable floor. A hybrid KF+NN (KalmanNet-style) has nothing left to gain in the quiet regime.
+Specific state-level rankings (which estimator wins on which state) are model-dependent: they change on the sealed generator. Only the wall-error invariance finding transfers.
 
-### 3. Learned model fails under scanner dropouts
+## Architecture
 
-At 20% dropout, learned H RMSE is **6.8 mm against EKF's 0.028 mm — a factor of 240×**. Model-based physics propagation carries the KF through blocked scans. The learned model, having never seen 5-6 consecutive dropouts in training, extrapolates onto chaos. Pre-registered claim validated: fusion wins when direct sensors are unreliable.
+Five-state EKF: layer height, standoff, part temperature, pyrometer bias, previous height. Three sensor channels: laser line scanner, pyrometer, CTWD (arc-signal placeholder). Eight sensor subsets (2^3) evaluated for observability via the noise-weighted Gramian and exact Shapley values.
 
-### Pre-registration verdict
+The process model uses mass conservation for bead area, a height/width split governed by a shape factor, and a lumped thermal balance with a wall-height-dependent time constant. Planted errors (wire-feed slope, thermal time constant, CTWD map bias) are swept independently to map where each estimator breaks.
 
-| # | Prediction | Verdict |
-|---|---|---|
-| P1 | KF wins at zero error | **Half**. EKF wins H and standoff; learned wins T |
-| P2 | Learned overtakes KF at mid error | **Half**. Learned beats EKF on T at any fw error |
-| P3 | State RMSE ranking ≠ wall-error ranking | **Confirmed strongly** |
-| P4 | Naive within 10% of best sometimes | **Wrong**. Naive never within 10% on standoff/T |
-| P5 | Standoff benefits most from fusion | **Wrong**. H benefits most |
+## Limitations
 
-Three of five predictions were wrong or half-right. That is the pre-reg doing its job.
-
-### What is model-dependent (fails sealed check)
-
-Specific "which estimator wins on which state" claims. On the sealed generator, naive wins H and T, learned wins standoff. The famous "EKF collapses on T under fw error" result is a feature of the main generator, not a universal truth.
-
-### Honest limits
-
-- Thermal model does not include spatial gradient along the wall. Teixeira 2023 shows ~200 °C variation along a WAAM layer; we use a single-node lumped balance.
-- Learned trained on 20 builds without proper GroupKFold within training. Hyperparameters were not tuned.
-- CTWD placeholder is a scalar nonlinearity, not the Bratzel 2022 LSTM. Real arc-signal-to-CTWD regression would be more complex.
-- Hardware never run. Numbers are simulated, calibrated against PIONEER WAAM data (Zenodo 17608626) but not validated against a HiWi cell.
-- EKF Jacobian ignores the ∂τ/∂H coupling (small per-step effect, absorbed by Q).
-
-## Methodology inspiration
-
-Not borrowed from WAAM. The workflow (simulated testbed + multiple estimators + planted-error sweep + crossover + sealed check) is standard in these fields:
-
-- **MultiCorrupt** ([arXiv 2402.11677](https://arxiv.org/abs/2402.11677)): AV sensor-fusion robustness benchmark with corruption types × severity levels. Our planted-error sweep structure.
-- **KalmanNet** (Revach et al., IEEE TSP 2022, [arXiv 2107.10043](https://arxiv.org/abs/2107.10043)): KF vs learned vs hybrid on nonlinear tracking. Our EKF-vs-learned comparison mirrors theirs.
-- **Tennessee Eastman Process** (Downs & Vogel 1993): classic chemical-process benchmark with planted faults. 30+ years of pre-registered-style discipline.
-- **EuRoC MAV** / TUM-RGBD SLAM benchmarks: state RMSE (trajectory) vs outcome error (mapping) distinction, same shape as our state RMSE vs wall_err finding.
-
-No targeted-search result found that applies this method to WAAM. The simulation-based scoring is the contribution.
+- Single-node lumped thermal model, no spatial gradient along the wall. Real WAAM layers show ~200 C variation along the bead (Teixeira 2023).
+- CTWD channel is a scalar nonlinearity, not the Bratzel 2022 LSTM. Real arc-signal regression would be more complex.
+- Learned estimator trained on 20 builds without GroupKFold within training. Hyperparameters not tuned.
+- Hardware never run. All numbers are simulated, calibrated against PIONEER data but not validated on a live cell.
+- EKF Jacobian ignores the d(tau)/dH coupling (small per-step, absorbed by Q tuning).
 
 ## How to run
 
 ```bash
 pip install -r requirements.txt
 
-# physics + estimator smoke tests
-python src/run_waam.py            # simulator sweep over dwell
-python src/run_sensors.py         # sensor truth-vs-obs plot
-python src/run_estimators.py      # open-loop estimator comparison
-python src/run_closed_loop.py     # closed-loop estimator comparison
+# process and estimator verification
+python src/run_waam.py
+python src/run_sensors.py
+python src/run_estimators.py
+python src/run_closed_loop.py
 
-# the main results
-python src/run_sweep.py           # 2880-run planted-error sweep + 4 figures
-python src/run_dropout_sweep.py   # scanner-dropout stress test
-python src/run_sealed_check.py    # pre-registered sealed-variant check
+# main results
+python src/run_sweep.py             # planted-error sweep, 2880 runs
+python src/run_dropout_sweep.py     # scanner dropout stress test
+python src/run_sealed_check.py      # sealed-variant check
 
-# stop B: observability + sensor value
-python src/run_stopB.py           # CRB floors + Shapley + Pareto front
+# stop B: observability and sensor value
+python src/run_stopB.py             # CRB floors, Shapley, Pareto front
 
-# the stop-0 real-data probe
-python src/probe_pioneer.py       # PIONEER WAAM GO/NO-GO (already run)
+# real-data probe
+python src/probe_pioneer.py         # PIONEER WAAM data check
 ```
 
-Total end-to-end runtime on a laptop: about 90 seconds.
+End-to-end runtime: about 90 seconds on a laptop.
 
 ## Layout
 
 ```
-simulation-field/
-  src/
-    process.py            waam bead physics (mass conservation, width/height split)
-    simulator.py          layer-by-layer open-loop simulator
-    sensors.py            scanner, pyrometer, CTWD placeholder
-    harness.py            closed-loop sim + estimator + controller
-    estimators.py         naive baseline
-    ekf.py                extended kalman filter + KFParams dataclass
-    learned.py            gradient-boosted regressor estimator
-    oracle.py             EKF with true params + correct nonlinear CTWD
-    sweep.py              planted-error sweep over estimators
-    plot_crossover.py     bootstrap-CI crossover plots
-    run_*.py              entry points
-    probe_pioneer.py      stop 0 PIONEER probe
-  docs/
-    decisions/
-      pre-registration.md       frozen 2026-10-26
-      decisions-log.md          dated decisions
-      source-corrections.md     v0.1 citation fixes
-    design/
-      original-plan-v0.1.md     first plan, kept as written
-      process-and-sensor-model.md  equations and sources
-    learning-path.md
-    future-work.md
-    README.md
-  data/
-    pioneer_17608626/     downloaded PIONEER walls (git-ignored)
-    README.md             dataset manifest
-  reports/
-    stop0/                PIONEER probe figures
-    stopA_sim/            all crossover + dropout + sealed figures + CSVs
-    stopB/                observability heatmap + Pareto front
+src/
+  process.py            bead physics (mass conservation, width/height split)
+  simulator.py          layer-by-layer simulator
+  sensors.py            scanner, pyrometer, CTWD placeholder
+  ekf.py                extended Kalman filter
+  learned.py            gradient-boosted regressor estimator
+  oracle.py             EKF with true parameters
+  estimators.py         naive baseline
+  harness.py            closed-loop controller + estimator harness
+  sweep.py              planted-error sweep engine
+  observability.py      Gramian, Fisher information, CRB
+  sensor_value.py       Shapley values, cost-weighted Pareto
+  plot_crossover.py     bootstrap-CI crossover figures
+  run_*.py              entry points
+  probe_pioneer.py      PIONEER real-data probe
+docs/
+  decisions/
+    pre-registration.md       predictions and gates, frozen 2026-10-26
+    decisions-log.md          dated scope and method decisions
+    source-corrections.md     citation fixes from the original plan
+  design/
+    process-and-sensor-model.md   equations, sensor models, calibration
+    original-plan-v0.1.md         first plan, kept as written
+  learning-path.md
+reports/
+  stop0/          PIONEER probe figures
+  stopA_sim/      crossover, dropout, sealed figures and CSVs
+  stopB/          observability heatmap, Pareto front
+data/
+  README.md       dataset manifest
 ```
 
 ## Key figures
 
-In `reports/stopA_sim/`:
-
 | File | Shows |
 |---|---|
-| `dropout_rmse_H.png` | Learned collapses at 6.8 mm, EKF holds at 0.028 mm. The 240× gap |
-| `crossover_rmse_T.png` | EKF matches oracle at zero fw error, diverges to 13.3 °C at fw=0.60 |
-| `crossover_wall_err.png` | All four estimators overlap at 1.015 mm. Q8 answer |
-| `sealed_vs_main_T.png` | Rankings do not survive the sealed check on T |
-| `sweep_results.csv` | All 2880 planted-error runs |
-| `sweep_dropout.csv` | All 2880 dropout runs |
-| `sweep_sealed.csv` | All 2160 sealed-generator runs |
+| `reports/stopA_sim/crossover_wall_err.png` | All four estimators overlap at 1.015 mm wall error |
+| `reports/stopA_sim/dropout_rmse_H.png` | Learned collapses at 6.8 mm, EKF holds at 0.028 mm |
+| `reports/stopA_sim/crossover_rmse_T.png` | EKF tracks oracle at zero error, diverges under planted fw error |
+| `reports/stopA_sim/sealed_vs_main_T.png` | State rankings do not survive the sealed check |
+| `reports/stopB/gramian_heatmap.png` | Observability Gramian across sensor subsets |
+| `reports/stopB/pareto_front.png` | Cost vs composite RMSE Pareto front |
 
-## Links
+## Methodology
 
-- [docs/decisions/pre-registration.md](docs/decisions/pre-registration.md) — frozen 2026-10-26. Predictions P1-P5, sealed variant, core gate.
-- [docs/design/process-and-sensor-model.md](docs/design/process-and-sensor-model.md) — equations, sensor models, calibration targets.
-- [docs/decisions/source-corrections.md](docs/decisions/source-corrections.md) — citation fixes from the v0.1 plan.
-- [docs/future-work.md](docs/future-work.md) — wire-laser DED module, powder DED module, parked method items.
+The workflow (simulated testbed, multiple estimators, planted-error sweep, crossover analysis, sealed-variant check) draws from established practice outside AM:
+
+- **MultiCorrupt** (arXiv 2402.11677): AV sensor-fusion robustness benchmark with corruption types and severity levels.
+- **KalmanNet** (Revach et al., IEEE TSP 2022): KF vs learned vs hybrid on nonlinear state estimation.
+- **Tennessee Eastman Process** (Downs and Vogel 1993): chemical-process benchmark with planted faults, 30+ years of use.
+
+No prior work was found applying this method to WAAM.
+
+## References
+
+- [Pre-registration](docs/decisions/pre-registration.md): predictions P1-P5, gates, sealed variant definition.
+- [Process and sensor model](docs/design/process-and-sensor-model.md): equations, parameters, calibration.
+- [Source corrections](docs/decisions/source-corrections.md): citation fixes from the original plan.

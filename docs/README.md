@@ -1,13 +1,12 @@
 # Docs
 
-The engineering record behind Simulation Field: what was decided, why, and what was tried and dropped.
+The engineering record behind waam-sensor-fusion: what was decided, why, and what was tried and dropped.
 
 ## Reading order
 
 1. **[decisions/pre-registration.md](decisions/pre-registration.md)**: predictions and gates, written before code. Frozen 2026-10-26.
 2. **[design/process-and-sensor-model.md](design/process-and-sensor-model.md)**: equations, parameters, sensor models and the calibration checklist.
 3. **[learning-path.md](learning-path.md)**: what to study, in order, mapped to the stops.
-4. **[future-work.md](future-work.md)**: wire-laser DED, powder DED, parked method items, ROS 2.
 5. **[decisions/](decisions/)**: supporting records.
    - [decisions-log.md](decisions/decisions-log.md): dated decisions.
    - [source-corrections.md](decisions/source-corrections.md): what v0.1 cited wrongly and the fixes.

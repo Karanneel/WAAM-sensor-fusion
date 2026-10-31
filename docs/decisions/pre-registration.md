@@ -13,7 +13,7 @@ Written before any code. Once the **Frozen** line below has a date, nothing abov
 |---|---|---|
 | P1 | At zero planted error, which estimator has the lowest final wall-height error? | Kalman filter wins, because the simulator's physics is also its model |
 | P2 | At what planted-error level (low / mid / high) does the learned model overtake the Kalman filter on final wall error? | Mid |
-| P3 | Does the state-RMSE ranking match the final-wall-error ranking at every error level? | No, cannot match at every level — expect at least one flip |
+| P3 | Does the state-RMSE ranking match the final-wall-error ranking at every error level? | No, cannot match at every level, expect at least one flip |
 | P4 | Does the naive "carry last scan forward" baseline come within 10% of the best estimator on final wall-height error? | Sometimes, under a few conditions, not every condition |
 | P5 | Which unmeasured state benefits most from fusion: standoff between scans, drifted temperature, or dropout periods? | Standoff between scans |
 
@@ -62,7 +62,7 @@ The sealed variant runs **once**, after all tuning on the main generator, after 
 
 ## Addenda
 
-### 2026-10-31 — Stop A verdict
+### 2026-10-31, Stop A verdict
 
 **Overall core gate:** PASS. At zero and low planted-error levels, both EKF and learned beat naive by 10%+ on 2 of 3 unmeasured states.
 
