@@ -1,0 +1,45 @@
+# ---- Data -------------------------------------------------------------
+# Downloaded datasets are not redistributed; see data/README.md.
+data/*
+!data/README.md
+!data/pull_log.csv
+
+# Simulation outputs and large derived files
+runs/
+*.parquet
+*.feather
+*.pkl
+*.joblib
+*.h5
+*.npz
+
+# ---- Python -----------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- OS / editors -----------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Office lock files
+~$*
+
+# ---- Excluded from public repo ----------------------------------------
+# Internal decision-process records not suited for public release
+docs/decisions/council-run/
+docs/decisions/council-verdict.md
+docs/design/research-notes/
+docs/design/research-report.md
+docs/master-decision-doc.md
+reports/time-log.md
