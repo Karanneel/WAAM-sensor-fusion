@@ -1,122 +1,117 @@
-# waam-sensor-fusion
+# WAAM sensor fusion
 
-A simulation testbed for comparing sensor fusion strategies in wire-arc additive manufacturing (WAAM). Four estimators (naive baseline, extended Kalman filter, gradient-boosted learned model, oracle) are scored against known ground truth across planted process-model errors, generator variations, and scanner dropout, with all predictions registered before code was written.
+In wire-arc additive manufacturing, a welding torch feeds wire and builds a metal
+wall one layer at a time. As the wall heats up, the same amount of material can
+spread into a wider, lower bead. Small height errors then change the distance
+between the nozzle and the wall.
 
-## Why this exists
+I built this simulation to investigate a control question: **does a better
+estimate of the process state lead to a better finished wall?**
 
-Sensor fusion papers in additive manufacturing typically report accuracy on one dataset with one model. There is no open testbed that holds the process physics, the estimators, and the controller in one loop and asks: does a better state estimate actually produce a better part?
+![Wall height, nozzle position, standoff and sensor measurements](reports/figures/wall_schematic.png)
 
-This project answers that question for a simulated WAAM single-bead wall. The simulator is calibrated against real WAAM data (PIONEER, Zenodo 17608626), and every finding is classified as structural or model-dependent using a sealed generator variant the estimators never saw during tuning.
+The simulator supplies a known height, standoff and temperature. Three imperfect
+sensor channels observe them: a delayed height scanner, a drifting pyrometer,
+and a synthetic arc-based standoff signal. Different estimators use those
+readings to drive the same travel-speed controller.
 
-## What it found
+## A simulated build
 
-Three findings survive the sealed-variant check, the oracle floor, and 20% scanner dropout.
+![A 31-layer build with true and estimated height and applied travel speed](reports/figures/wall_build.gif)
 
-**1. Final wall error is estimator-invariant.** Oracle, EKF, learned and naive all produce 1.015 mm wall error. The fixed layer-to-layer controller absorbs estimator differences before they reach the part. At this operating point, estimator sophistication does not change the outcome.
+Each step deposits a layer, cools the wall, takes measurements and estimates the
+new state. The controller then chooses the next travel speed: an estimate above
+the target makes it move faster and deposit a thinner bead. Nozzle lift follows
+estimated growth to maintain clearance.
 
-**2. EKF matches oracle at zero planted error.** On height and standoff RMSE, the EKF sits on the oracle floor (correct physics, correct nonlinear CTWD inversion). Physics-based fusion with correct parameters is already at the achievable limit.
+The drawing is a schematic side view generated from the simulation. The model
+has one height and one temperature per layer; it does not calculate a spatial
+thermal field, a melt pool or a robot trajectory.
 
-**3. Learned model fails under scanner dropout.** At 20% dropout, learned height RMSE is 6.8 mm versus EKF at 0.028 mm, a factor of 240x. The EKF propagates physics through blocked scans. The learned model, trained without consecutive dropout sequences, extrapolates into divergence.
+## What the comparison shows
 
-Specific state-level rankings (which estimator wins on which state) are model-dependent: they change on the sealed generator. Only the wall-error invariance finding transfers.
+The current runs compare a latest-reading baseline, an extended Kalman filter
+(EKF), a learned estimator with three gradient-boosted regressors, and a reference EKF with the nominal
+nonlinear standoff curve. A fifth model receives the build schedule and applied
+speed but no sensor readings. It checks how much can be predicted without sensing.
 
-## Architecture
+![Mean final wall error and height-estimation error with nominal and increased scanner dropout](reports/figures/estimator_comparison.png)
 
-Five-state EKF: layer height, standoff, part temperature, pyrometer bias, previous height. Three sensor channels: laser line scanner, pyrometer, CTWD (arc-signal placeholder). Eight sensor subsets (2^3) evaluated for observability via the noise-weighted Gramian and exact Shapley values.
+For 31 layers, 60 s dwell and controller gain 1, the mean final height errors
+across 30 test builds are:
 
-The process model uses mass conservation for bead area, a height/width split governed by a shape factor, and a lumped thermal balance with a wall-height-dependent time constant. Planted errors (wire-feed slope, thermal time constant, CTWD map bias) are swept independently to map where each estimator breaks.
+| Estimator | 2% scanner dropout | 20% scanner dropout |
+|---|---:|---:|
+| Latest-reading baseline | 0.230 mm | 0.235 mm |
+| EKF | 0.251 mm | 0.256 mm |
+| Learned | 0.233 mm | 0.414 mm |
+| Reference EKF | 0.251 mm | 0.256 mm |
+| Learned, no sensors | 1.294 mm | 1.294 mm |
 
-## Limitations
+At nominal dropout, the EKF estimates height more accurately than the baseline
+(mean RMSE 0.056 versus 0.082 mm), but its final wall error is slightly larger.
+Under increased dropout, the learned model's height estimates and final wall
+error worsen. These point estimates describe this setting; small differences
+are not presented as statistically significant wins.
 
-- Single-node lumped thermal model, no spatial gradient along the wall. Real WAAM layers show ~200 C variation along the bead (Teixeira 2023).
-- CTWD channel is a scalar nonlinearity, not the Bratzel 2022 LSTM. Real arc-signal regression would be more complex.
-- Learned estimator trained on 20 builds without GroupKFold within training. Hyperparameters not tuned.
-- Hardware never run. All numbers are simulated, calibrated against PIONEER data but not validated on a live cell.
-- EKF Jacobian ignores the d(tau)/dH coupling (small per-step, absorbed by Q tuning).
+The wider sweep changes estimator-model parameters, the CTWD measurement curve,
+controller gain and generator assumptions. The [experiment report](reports/experiments/summary.md)
+includes paired improvement checks. [Sensor selection](reports/sensor_selection/summary.md)
+compares all eight sensor subsets separately for the EKF and learned model.
 
-## How to run
+## What changed during development
+
+The first version controlled nozzle height while scoring deposited wall height.
+Those quantities were disconnected in its equations, so every estimator produced
+the same final wall. That was a model-design problem, not evidence that estimation
+does not matter. The current controller changes travel speed, which changes
+bead area through mass conservation.
+
+The revision also separates training and test builds, aligns sensor timing,
+adds small physical differences between builds, and includes a no-sensor learned
+baseline. The [revision record](docs/decisions/revision-2026-11-01.md) explains
+which earlier claims were withdrawn. [Earlier files](reports/archive/README.md)
+remain available for comparison.
+
+## Run it
+
+Tested with Python 3.11. The simulation does not need the PIONEER download.
+From the project folder:
 
 ```bash
-pip install -r requirements.txt
-
-# process and estimator verification
-python src/run_waam.py
-python src/run_sensors.py
-python src/run_estimators.py
+python -m pip install -r requirements.txt
 python src/run_closed_loop.py
-
-# main results
-python src/run_sweep.py             # planted-error sweep, 2880 runs
-python src/run_dropout_sweep.py     # scanner dropout stress test
-python src/run_sealed_check.py      # sealed-variant check
-
-# stop B: observability and sensor value
-python src/run_stopB.py             # CRB floors, Shapley, Pareto front
-
-# real-data probe
-python src/probe_pioneer.py         # PIONEER WAAM data check
 ```
 
-End-to-end runtime: about 90 seconds on a laptop.
+This prints estimator errors and writes build plots to `reports/experiments/`.
+To reproduce the full analysis and README figures:
 
-## Layout
-
-```
-src/
-  process.py            bead physics (mass conservation, width/height split)
-  simulator.py          layer-by-layer simulator
-  sensors.py            scanner, pyrometer, CTWD placeholder
-  ekf.py                extended Kalman filter
-  learned.py            gradient-boosted regressor estimator
-  oracle.py             EKF with true parameters
-  estimators.py         naive baseline
-  harness.py            closed-loop controller + estimator harness
-  sweep.py              planted-error sweep engine
-  observability.py      Gramian, Fisher information, CRB
-  sensor_value.py       Shapley values, cost-weighted Pareto
-  plot_crossover.py     bootstrap-CI crossover figures
-  run_*.py              entry points
-  probe_pioneer.py      PIONEER real-data probe
-docs/
-  decisions/
-    pre-registration.md       predictions and gates, frozen 2026-10-26
-    decisions-log.md          dated scope and method decisions
-    source-corrections.md     citation fixes from the original plan
-  design/
-    process-and-sensor-model.md   equations, sensor models, calibration
-    original-plan-v0.1.md         first plan, kept as written
-  learning-path.md
-reports/
-  stop0/          PIONEER probe figures
-  stopA_sim/      crossover, dropout, sealed figures and CSVs
-  stopB/          observability heatmap, Pareto front
-data/
-  README.md       dataset manifest
+```bash
+python src/run_experiments.py
+python src/run_sensor_analysis.py
+python src/make_figures.py
+python -m unittest discover -s tests -v
 ```
 
-## Key figures
+The full runner fits the models once and uses them for both dropout conditions
+and the generator variant. It writes the settings, package versions and source
+hashes to [manifest.json](reports/experiments/manifest.json). Running it replaces
+the current experiment outputs.
 
-| File | Shows |
-|---|---|
-| `reports/stopA_sim/crossover_wall_err.png` | All four estimators overlap at 1.015 mm wall error |
-| `reports/stopA_sim/dropout_rmse_H.png` | Learned collapses at 6.8 mm, EKF holds at 0.028 mm |
-| `reports/stopA_sim/crossover_rmse_T.png` | EKF tracks oracle at zero error, diverges under planted fw error |
-| `reports/stopA_sim/sealed_vs_main_T.png` | State rankings do not survive the sealed check |
-| `reports/stopB/gramian_heatmap.png` | Observability Gramian across sensor subsets |
-| `reports/stopB/pareto_front.png` | Cost vs composite RMSE Pareto front |
+## Limits and further reading
 
-## Methodology
+This is a simulation study. The physical variation ranges, noise levels and
+relative sensor costs are assumptions. The CTWD signal is a placeholder rather
+than a model trained on welding waveforms. The reference EKF is a comparison
+model, not an accuracy floor. The already inspected generator variant is a
+sensitivity test, not an unseen validation set.
 
-The workflow (simulated testbed, multiple estimators, planted-error sweep, crossover analysis, sealed-variant check) draws from established practice outside AM:
+The optional [PIONEER data probe](data/README.md) inspects thermocouple logs and
+final wall scans. It has not established measured per-layer height or a
+calibration fit, so the simulator is not claimed to be calibrated or validated
+against a real welding cell.
 
-- **MultiCorrupt** (arXiv 2402.11677): AV sensor-fusion robustness benchmark with corruption types and severity levels.
-- **KalmanNet** (Revach et al., IEEE TSP 2022): KF vs learned vs hybrid on nonlinear state estimation.
-- **Tennessee Eastman Process** (Downs and Vogel 1993): chemical-process benchmark with planted faults, 30+ years of use.
-
-No prior work was found applying this method to WAAM.
-
-## References
-
-- [Pre-registration](docs/decisions/pre-registration.md): predictions P1-P5, gates, sealed variant definition.
-- [Process and sensor model](docs/design/process-and-sensor-model.md): equations, parameters, calibration.
-- [Source corrections](docs/decisions/source-corrections.md): citation fixes from the original plan.
+The [model notes](docs/design/process-and-sensor-model.md) give the equations and
+measurement timeline. The [experiment protocol](docs/experiment-protocol.md)
+defines splits, perturbations and scoring. [Study references](docs/learning-path.md)
+cover filtering, validation and WAAM context.

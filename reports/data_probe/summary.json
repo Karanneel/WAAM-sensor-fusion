@@ -1,0 +1,40 @@
+{
+  "thermal_series": {
+    "30": {
+      "logged_layer_labels": 32,
+      "peak_C": 252.89999961853027
+    },
+    "60": {
+      "logged_layer_labels": 32,
+      "peak_C": 231.44999980926514
+    }
+  },
+  "wall_profiles": {
+    "0": {
+      "z_min": 4.302115440368652,
+      "z_max": 46.79159164428711
+    },
+    "30": {
+      "z_min": -6.135820388793945,
+      "z_max": 53.399593353271484
+    },
+    "120": {
+      "z_min": -10.178346633911133,
+      "z_max": 53.2343635559082
+    },
+    "240": {
+      "z_min": -8.331890106201172,
+      "z_max": 55.66141891479492
+    }
+  },
+  "errors": {
+    "0": "no directly logged layer labels",
+    "90": "no directly logged layer labels",
+    "120": "no directly logged layer labels",
+    "240": "no directly logged layer labels",
+    "scan_60": "STL contains no directly readable wall mesh"
+  },
+  "calibration_status": "not fitted",
+  "original_requirements_satisfied": false,
+  "conclusion": "Exploratory data only; no measured per-layer height or three-dwell interlayer-temperature validation established."
+}

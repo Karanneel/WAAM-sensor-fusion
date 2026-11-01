@@ -1,19 +1,7 @@
-"""
-extended kalman filter for the waam testbed.
+"""Extended Kalman filter for end-of-deposition height, standoff and temperature.
 
-state x = [H, standoff, T, pyro_bias, H_prev]
-  H, standoff, T   physical process states
-  pyro_bias        slow random-walk emissivity bias (multiplicative)
-  H_prev           previous layer's H; scanner is one layer late so we need it
-
-process model uses the simulator's physics (optionally with planted errors to
-test the circularity defense).
-
-measurements:
-  scanner  -> H_prev,     linear
-  pyro     -> bias * T,   nonlinear in bias and T
-  CTWD     -> standoff,   linear in the KF; truth is nonlinear + biased, that
-                          mismatch is the model error the sweep tests
+The last two states track multiplicative pyrometer bias and the previous
+height, needed for the scanner's one-layer delay. All speeds use mm/s.
 """
 
 from dataclasses import dataclass
@@ -26,7 +14,7 @@ from sensors import (SCANNER_SIGMA, PYRO_NOISE_SIGMA, CTWD_NOISE_SIGMA,
 
 @dataclass
 class KFParams:
-    """physics params the KF believes. the sweep multiplies these to plant error"""
+    """Nominal process parameters assumed by the filter."""
     width_ref: float = 8.0
     ts_ref: float = 5.0
     fw_slope: float = 0.0023
@@ -40,6 +28,7 @@ class KFParams:
     h_mass: float = 15.0
     t_amb: float = 25.0
     wall_length: float = 150.0
+    cooling_exponent: float = 1.0
 
 
 def _bead_width(ts, T, p):
@@ -67,16 +56,25 @@ def _dh_dT(wfs, ts, T, p):
 
 
 def _thermal_predict(T, H, dwell, ts, p):
-    tau = p.tau_base + p.tau_growth * H
-    t_dep = p.wall_length / ts
-    dt_eff = p.dt_layer / (1.0 + H / p.h_mass)
-    peak = T + dt_eff
-    T_dep = p.t_amb + (peak - p.t_amb) * math.exp(-t_dep / tau)
-    return p.t_amb + (T_dep - p.t_amb) * math.exp(-dwell / tau)
+    tau = p.tau_base + p.tau_growth*H
+    elapsed = p.wall_length/ts + dwell
+    heat = p.dt_layer/(1+H/p.h_mass)
+    return p.t_amb + (T+heat-p.t_amb)*math.exp(-(elapsed/tau)**p.cooling_exponent)
+
+
+def _thermal_derivatives(T, H, dwell, ts, p):
+    tau = p.tau_base+p.tau_growth*H
+    elapsed = p.wall_length/ts+dwell
+    power = (elapsed/tau)**p.cooling_exponent
+    decay = math.exp(-power)
+    heat = p.dt_layer/(1+H/p.h_mass)
+    heat_slope = -p.dt_layer/p.h_mass/(1+H/p.h_mass)**2
+    dH = decay*(heat_slope+(T+heat-p.t_amb)*p.cooling_exponent*power*p.tau_growth/tau)
+    return dH, decay
 
 
 class EKF:
-    """extended kalman filter, same interface as estimators.Naive"""
+    """Predict with the applied controls, then assimilate layer-end measurements."""
 
     def __init__(self, H0=0.0, standoff0=CTWD_NOMINAL, T0=25.0, bias0=1.0,
                  params=None):
@@ -100,16 +98,14 @@ class EKF:
         T_new = _thermal_predict(T, H_new, dwell, ts, self.p)
         self.x = np.array([H_new, s_new, T_new, b, H])
 
-        # jacobian F wrt previous state
         dh_dT = _dh_dT(wfs, ts, T, self.p)
-        tau = self.p.tau_base + self.p.tau_growth * H_new
-        decay = math.exp(-(self.p.wall_length / ts + dwell) / tau)
+        thermal_H, thermal_T = _thermal_derivatives(T, H_new, dwell, ts, self.p)
         F = np.array([
-            [1, 0, dh_dT,  0, 0],   # H
-            [0, 1, -dh_dT, 0, 0],   # standoff
-            [0, 0, decay,  0, 0],   # T
-            [0, 0, 0,      1, 0],   # bias
-            [1, 0, 0,      0, 0],   # H_prev <- previous H
+            [1, 0, dh_dT, 0, 0],
+            [0, 1, -dh_dT, 0, 0],
+            [thermal_H, 0, thermal_T+thermal_H*dh_dT, 0, 0],
+            [0, 0, 0, 1, 0],
+            [1, 0, 0, 0, 0],
         ])
         self.P = F @ self.P @ F.T + self.Q
 
@@ -118,7 +114,9 @@ class EKF:
         S = (H_row @ self.P @ H_row.T).item() + R
         K = (self.P @ H_row.T).flatten() / S
         self.x = self.x + K * innovation
-        self.P = (np.eye(5) - np.outer(K, H_row.flatten())) @ self.P
+        residual = np.eye(5)-np.outer(K, H_row.flatten())
+        self.P = residual @ self.P @ residual.T + np.outer(K, K)*R
+        self.P = (self.P+self.P.T)/2
 
     def _update_scanner(self, z):
         pred = self.x[4]

@@ -1,106 +1,69 @@
-"""
-planted-error sweep.
+"""Compare estimators under explicit model and measurement perturbations."""
 
-three error types perturbed one at a time:
-  fw     scale KF's fw_slope by (1 + level)
-  tau    scale KF's tau_base by (1 + level)
-  ctwd   scale truth's CTWD quadratic coefficient by (1 + level); KF's linear
-         model is unchanged, so its measurement-model error grows
-
-at every (error_type, level, controller_gain) cell, run n_seeds builds per
-estimator and record the state RMSE and the final wall-height error
-"""
-
-from dataclasses import dataclass
 import numpy as np
 import pandas as pd
-
 from harness import run_closed_loop
 from estimators import Naive
 from ekf import EKF, KFParams
 from learned import Learned
-from oracle import Oracle
+from reference_filter import ReferenceEKF
+
+ERROR_TYPES = ('width_temperature', 'cooling_time', 'ctwd_curve')
+LEVELS = (0.0, 0.15, 0.30, 0.60)
+GAINS = (0.5, 1.0)
+EVALUATION_SEEDS = range(30)
 
 
-def _make_naive_builder():
-    return lambda: Naive()
-
-
-def _make_ekf_builder(error_type, level):
+def ekf_builder(error_type, level, subset=None):
     p = KFParams()
-    if error_type == "fw":
-        p.fw_slope *= (1.0 + level)
-    elif error_type == "tau":
-        p.tau_base *= (1.0 + level)
-    return lambda: EKF(params=p)
+    if error_type == 'width_temperature':
+        p.fw_slope *= 1+level
+    elif error_type == 'cooling_time':
+        p.tau_base *= 1+level
+    elif error_type != 'ctwd_curve':
+        raise ValueError(f'Unknown error type: {error_type}')
+    class SubsetEKF(EKF):
+        def update(self, obs, control):
+            return super().update(obs, control, active_sensors=subset)
+    return lambda: SubsetEKF(params=p)
 
 
-def _make_learned_builder(models):
-    return lambda: Learned(models)
+def score_build(rows, estimates, observations, metrics):
+    def rmse(state, truth, mask=None):
+        errors = np.array([e[state]-r[truth] for e, r in zip(estimates, rows)])
+        if mask is not None:
+            errors = errors[mask]
+        return float(np.sqrt(np.mean(errors**2))) if len(errors) else np.nan
+    # Layer one has no previous wall to scan; it is not a spatter dropout.
+    missing = np.array([o['scanner'] is None and r['layer']>1 for o, r in zip(observations, rows)])
+    H_missing = rmse('H', 'H_out', missing)
+    s_missing = rmse('standoff', 'standoff', missing)
+    return dict(wall_err=metrics['wall_err'], last_S=metrics['last_standoff'],
+                mean_ts=metrics['mean_ts'], rmse_H=rmse('H', 'H_out'),
+                rmse_T=rmse('T', 'T_out'), rmse_s=rmse('standoff', 'standoff'),
+                dropout_count=int(missing.sum()), rmse_dropout_H=H_missing,
+                rmse_dropout_s=s_missing,
+                dropout_joint=float(np.hypot(H_missing, s_missing)))
 
 
-def _run_cell(dwell, seed, gain, error_type, level, models, sealed=False,
-              scanner_dropout_p=None):
-    """one build per estimator at a single sweep cell"""
-    # truth sensor state is only perturbed under ctwd error
-    sens_kwargs = {}
-    truth_ctwd_quad = 0.005
-    if error_type == "ctwd":
-        truth_ctwd_quad = 0.005 * (1.0 + level)
-        sens_kwargs["ctwd_quad"] = truth_ctwd_quad
-
-    builders = {
-        "naive":   _make_naive_builder(),
-        "EKF":     _make_ekf_builder(error_type, level),
-        "learned": _make_learned_builder(models),
-        "oracle":  lambda: Oracle(ctwd_quad=truth_ctwd_quad),
-    }
-
-    spatter_p = 0.02 if scanner_dropout_p is None else scanner_dropout_p
-
-    out = {}
-    for name, b in builders.items():
-        rows, est, _, m, _ = run_closed_loop(
-            31, dwell, seed, estimator_builder=b,
-            controller_gain=gain, sealed=sealed,
-            spatter_p=spatter_p, **sens_kwargs,
-        )
-        H_true = [r["H_out"] for r in rows]
-        T_true = [r["T_out"] for r in rows]
-        s_true = [r["standoff"] for r in rows]
-        H_est = [e["H"] for e in est]
-        T_est = [e["T"] for e in est]
-        s_est = [e["standoff"] for e in est]
-        out[name] = {
-            "wall_err":  m["wall_err"],
-            "last_S":    m["last_standoff"],
-            "rmse_H":    float(np.sqrt(np.mean((np.array(H_est) - H_true) ** 2))),
-            "rmse_T":    float(np.sqrt(np.mean((np.array(T_est) - T_true) ** 2))),
-            "rmse_s":    float(np.sqrt(np.mean((np.array(s_est) - s_true) ** 2))),
-        }
-    return out
-
-
-def run_sweep(models, error_types=("fw", "tau", "ctwd"),
-              levels=(0.0, 0.15, 0.30, 0.60),
-              gains=(1.0, 0.5),
-              n_seeds=30, dwell=60, sealed=False,
-              dropout_p=None):
-    """returns a long-form pandas DataFrame of all runs"""
-    rows = []
-    for et in error_types:
-        for lv in levels:
-            for g in gains:
+def run_sweep(models, schedule_models=None, error_types=ERROR_TYPES, levels=LEVELS,
+              gains=GAINS, n_seeds=30, dwell=60, variant=False, dropout_p=0.02):
+    records = []
+    for error_type in error_types:
+        for level in levels:
+            curve = 0.005*(1+level) if error_type == 'ctwd_curve' else 0.005
+            for gain in gains:
                 for seed in range(n_seeds):
-                    cell = _run_cell(dwell, seed, g, et, lv, models,
-                                     sealed=sealed, scanner_dropout_p=dropout_p)
-                    for name, m in cell.items():
-                        rows.append({
-                            "error_type":   et,
-                            "level":        lv,
-                            "gain":         g,
-                            "seed":         seed,
-                            "estimator":    name,
-                            **m,
-                        })
-    return pd.DataFrame(rows)
+                    builders = dict(naive=Naive, EKF=ekf_builder(error_type, level),
+                                    learned=lambda: Learned(models),
+                                    reference=lambda: ReferenceEKF(ctwd_quad=curve, variant=variant))
+                    if schedule_models is not None:
+                        builders['schedule_only'] = lambda: Learned(schedule_models, subset=set())
+                    for name, builder in builders.items():
+                        rows, estimates, _, metrics, obs = run_closed_loop(
+                            31, dwell, seed, builder, controller_gain=gain,
+                            variant=variant, spatter_p=dropout_p, ctwd_quad=curve)
+                        records.append(dict(error_type=error_type, level=level, gain=gain,
+                                            seed=seed, estimator=name,
+                                            **score_build(rows, estimates, obs, metrics)))
+    return pd.DataFrame(records)

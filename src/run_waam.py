@@ -1,7 +1,4 @@
-"""
-smoke test for the waam generator. sweeps dwell and plots wall height and
-interlayer temperature. qualitative check: does hot build shorter than cold?
-"""
+"""Compare fixed-speed wall growth at several dwell settings."""
 
 import sys
 from pathlib import Path
@@ -13,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from simulator import run_build
 
 
-OUT = Path(__file__).resolve().parents[1] / "reports" / "stopA_sim"
+OUT = Path(__file__).resolve().parents[1] / "reports" / "experiments"
 OUT.mkdir(parents=True, exist_ok=True)
 
 
@@ -31,7 +28,7 @@ def plot_sweep(dwells=(0, 30, 60, 120, 240), n_layers=31):
     ax[0].set_title("simulated wall height, by dwell")
     ax[0].legend(title="dwell"); ax[0].grid(alpha=0.3)
     ax[1].set_xlabel("layer")
-    ax[1].set_ylabel("interlayer T (°C)")
+    ax[1].set_ylabel("interlayer T (C)")
     ax[1].set_title("simulated interlayer temperature, by dwell")
     ax[1].legend(title="dwell"); ax[1].grid(alpha=0.3)
     fig.tight_layout()

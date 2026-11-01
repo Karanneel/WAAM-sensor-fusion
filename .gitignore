@@ -1,11 +1,14 @@
-# ---- Data -------------------------------------------------------------
-# Downloaded datasets are not redistributed; see data/README.md.
+# Downloaded datasets stay local.
 data/*
 !data/README.md
 !data/pull_log.csv
 
-# Simulation outputs and large derived files
+# Local planning notes and release bundles.
+docs/internal/
+dist/
 runs/
+
+# Saved models and large intermediate arrays.
 *.parquet
 *.feather
 *.pkl
@@ -13,7 +16,7 @@ runs/
 *.h5
 *.npz
 
-# ---- Python -----------------------------------------------------------
+# Python environments and caches.
 __pycache__/
 *.py[cod]
 .venv/
@@ -25,22 +28,10 @@ env/
 .mypy_cache/
 .ruff_cache/
 
-# ---- OS / editors -----------------------------------------------------
+# Editor and operating-system files.
 .DS_Store
 Thumbs.db
 desktop.ini
 .vscode/
 .idea/
-
-# Office lock files
 ~$*
-
-# ---- Excluded from public repo ----------------------------------------
-# Internal decision-process records not suited for public release
-docs/decisions/council-run/
-docs/decisions/council-verdict.md
-docs/design/research-notes/
-docs/design/research-report.md
-docs/master-decision-doc.md
-reports/time-log.md
-docs/future-work.md

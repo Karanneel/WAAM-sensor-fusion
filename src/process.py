@@ -1,31 +1,44 @@
-"""
-waam process module. one-segment deposition from (wfs, ts, standoff, T).
+"""Single-bead geometry. Lengths are in mm and speeds in mm/s."""
 
-physics:
-  area from mass conservation, A = eta * A_wire * WFS / TS
-  width scales with travel speed and part temperature (hot layers run wider)
-  height = area / (shape_factor * width)
-"""
-
+from dataclasses import dataclass
 import math
+import numpy as np
 
-
-WIRE_D = 1.2             # mm, ER70S6 wire typical
+WIRE_D = 1.2
 ETA_DEP = 0.98
 A_WIRE = math.pi * (WIRE_D / 2) ** 2
-
-# reference op point for the width scaling. T_REF is room temp so cold builds
-# are at the reference width, and width only grows above it
-TS_REF = 5.0             # mm/s
-WIDTH_REF = 8.0          # mm
-T_REF = 25.0             # C
-
-SHAPE = 2 / 3            # parabolic cap
-FW_SLOPE = 0.0023        # fractional width gain per deg C above T_REF
-
-# standoff is a state. the arc stays stable within +/- S_UNSTABLE/2 of nominal
-S_NOM = 15.0             # mm
+TS_REF = 5.0
+WIDTH_REF = 8.0
+T_REF = 25.0
+SHAPE = 2 / 3
+FW_SLOPE = 0.0023
+S_NOM = 15.0
 S_UNSTABLE = 10.0
+
+
+@dataclass(frozen=True)
+class BuildParameters:
+    """Truth parameters, sampled once per build; never passed to an estimator."""
+    width_ref: float = WIDTH_REF
+    fw_slope: float = FW_SLOPE
+    eta_dep: float = ETA_DEP
+    shape: float = SHAPE
+    tau_base: float = 30.0
+    tau_growth: float = 5.0
+    heat_increment: float = 100.0
+    cooling_exponent: float = 1.0
+
+
+def sample_build_parameters(seed, varied=True, variant=False):
+    # These ranges are sensitivity assumptions, not fitted manufacturing tolerances.
+    rng = np.random.default_rng(np.random.SeedSequence([seed, 2000]))
+    spread = 0.05 if varied else 0.0
+    width, slope, tau, growth, heat = rng.uniform(1-spread, 1+spread, 5)
+    return BuildParameters(width_ref=WIDTH_REF*width, fw_slope=FW_SLOPE*slope,
+                           tau_base=30*tau, tau_growth=5*growth,
+                           heat_increment=100*heat,
+                           shape=0.75 if variant else SHAPE,
+                           cooling_exponent=0.85 if variant else 1.0)
 
 
 def bead_area(wfs, ts):
@@ -33,12 +46,7 @@ def bead_area(wfs, ts):
 
 
 def bead_width(ts, T):
-    # hot layers spread. width scaling with ts follows laser-cladding form,
-    # see Bax et al / RPI power law. clamp at T_REF so cold builds don't go
-    # narrower than reference
-    base = WIDTH_REF * (ts / TS_REF) ** -0.5
-    T_eff = max(T, T_REF)
-    return base * (1.0 + FW_SLOPE * (T_eff - T_REF))
+    return WIDTH_REF * (ts / TS_REF) ** -0.5 * (1 + FW_SLOPE * max(T-T_REF, 0))
 
 
 def bead_height(area, width):
@@ -46,19 +54,14 @@ def bead_height(area, width):
 
 
 def regime(standoff):
-    err = abs(standoff - S_NOM)
-    if err < S_UNSTABLE * 0.5:
-        return "stable"
-    if err < S_UNSTABLE:
-        return "unstable"
-    return "fault"
+    error = abs(standoff-S_NOM)
+    return 'stable' if error < S_UNSTABLE/2 else 'unstable' if error < S_UNSTABLE else 'fault'
 
 
-def deposit(wfs, ts, standoff, T, shape=None):
-    """one bead segment. returns area, width, height, regime.
-    shape overrides the module default (used by the sealed-generator check)"""
-    a = bead_area(wfs, ts)
-    w = bead_width(ts, T)
-    s = SHAPE if shape is None else shape
-    h = a / (s * w)
-    return a, w, h, regime(standoff)
+def deposit(wfs, ts, standoff, T, shape=None, params=None):
+    p = params or BuildParameters()
+    area = p.eta_dep * A_WIRE * wfs / ts
+    width = p.width_ref * (ts / TS_REF) ** -0.5 * (1 + p.fw_slope * max(T-T_REF, 0))
+    height = area / ((p.shape if shape is None else shape) * width)
+    # The regime is diagnostic only. Arc faults do not alter deposited mass here.
+    return area, width, height, regime(standoff)

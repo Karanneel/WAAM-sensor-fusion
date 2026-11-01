@@ -1,18 +1,39 @@
-# Data manifest
+# Optional PIONEER data
 
-Raw data is not redistributed. Download from the source, keep it in this folder (git-ignored), and log what was pulled in `pull_log.csv`.
+The simulated experiments run without external data. The exploratory probe
+uses [PIONEER WAAM, Zenodo record 17608626](https://zenodo.org/records/17608626),
+released under CC BY 4.0. Download the production-monitoring and metrology ZIPs
+from the record; the downloaded data are not redistributed here.
 
-No open dataset has per-layer measured height plus multiple in-process sensors for a wall. Real data checks the simulator's physics; it does not score fusion.
+Extract the relevant files into:
 
-| Priority | Dataset | Use | Contents | Size / licence | Status |
-|---|---|---|---|---|---|
-| 1 | [PIONEER WAAM Open Repository, Zenodo 17608626](https://zenodo.org/records/17608626) | Stop 0 probe; thermal calibration vs dwell | WAAM walls, ER70S6 and ER110SG, dwell 30/60/90/120/240 s. IR + active-illumination video (H.265 MKV); voltage, current, wire speed, robot speed/position, thermocouples (VTK); post-build STL point clouds with and without clamps; FEM predictions (VMAP) | ~9.1 GB in 7 ZIPs, CC BY 4.0 | Record checked 2026-10-17. Per-layer height **not confirmed** |
-| 2 | [Cranfield 24311296](https://dspace.lib.cranfield.ac.uk/handle/1826/22028), "Automated interlayer wall height compensation for wire based DED" | Possible WAAM height ground truth | Unknown | CC BY 4.0 | **Contents unverified**; open manually |
-| 3 | [ORNL WAAM co-registered](https://www.nature.com/articles/s41597-025-04638-0) (DOI 10.13139/ORNLNCCS/2439935) | Multi-rate replay; ROS 2 stage | Robot position ~16.7 Hz; current/voltage/wire feed 100 S/s; mic 50 kHz; captured as ROS bags, released as HDF5; XCT surface registered to STL | Globus; size not stated | No per-layer height |
-| Later (DED) | [NSF/TAMU DED Data Challenge, Zenodo 21285367](https://zenodo.org/records/21285367) | Height estimator check for the DED modules | Thermal camera 50 fps; profilometer height maps; single tracks | ~668 MB, CC BY 4.0 | Single tracks, not walls |
-| Later (DED) | [Chen LDED audio-visual, Zenodo 12604782](https://zenodo.org/records/12604782) | Camera vs mic classification only | Mic 44.1 kHz; coaxial CCD 30 Hz; one wall | 671 MB, CC BY 4.0 | No height or temperature truth; one build |
+```text
+data/pioneer_17608626/extracted/
+  vtk/
+    combined_file.vtk
+    05_CombinedFile_30.vtk
+    05_CombinedFile_60.vtk
+    05_CombinedFile_90.vtk
+    05_CombinedFile_120.vtk
+    05_CombinedFile_240.vtk
+  stl/
+    M1_0_Free.stl
+    M1_30_Free.stl
+    M1_60_Free.stl
+    M1_120_Free.stl
+    M1_240_Free.stl
+```
 
-## Tools for reading
+Install `requirements-data.txt`, then run `python src/probe_pioneer.py`.
+The probe reads directly logged layer labels; it does not invent labels where
+they are missing. It plots channel peaks per layer, not temperature immediately
+before deposition. Final scan Z coordinates are displayed without assuming a
+verified substrate datum or per-layer height truth.
 
-- STL: `trimesh` or `numpy-stl`. VTK: `pyvista` or `vtk`. MKV: `opencv-python` (optional for stop 0).
-- PIONEER's recommended viewers: FreeCAD 1.0.2 (STEP, STL), ParaView 5.12.1 with the VMAP plugin (VMAP, VTK), VLC (MKV).
+The JSON report lists missing channels/files and the number of usable series.
+A completed probe means data were inspected; it does not imply calibration or
+that the original data requirements passed.
+
+Layer labels in the VTK files have small floating-point rounding errors. The
+probe rounds values within 0.001 of an integer; the resulting 32 positive labels
+are reported as logged labels, without assuming that each is a deposited bead.

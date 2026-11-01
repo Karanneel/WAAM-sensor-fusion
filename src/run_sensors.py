@@ -1,7 +1,4 @@
-"""
-sensor smoke test. one build at mid dwell, overlay truth vs sensor readings
-for height, temperature, standoff.
-"""
+"""Inspect delayed height scans and layer-end temperature/standoff observations."""
 
 import io
 import sys
@@ -15,7 +12,7 @@ from simulator import run_build
 from sensors import SensorState, observe
 
 
-OUT = Path(__file__).resolve().parents[1] / "reports" / "stopA_sim"
+OUT = Path(__file__).resolve().parents[1] / "reports" / "experiments"
 OUT.mkdir(parents=True, exist_ok=True)
 
 
@@ -57,7 +54,7 @@ def plot_build(rows, obs):
 
     ax[1].plot(layers, T_true, label="truth", color="k", lw=2)
     ax[1].scatter(layers, pyro, label="pyrometer", s=25, alpha=0.8, color="C1")
-    ax[1].set_xlabel("layer"); ax[1].set_ylabel("T (°C)")
+    ax[1].set_xlabel("layer"); ax[1].set_ylabel("T (C)")
     ax[1].set_title("temperature: truth vs pyrometer")
     ax[1].legend(); ax[1].grid(alpha=0.3)
 
@@ -88,7 +85,7 @@ def summary(rows, obs):
     pyro = np.array([o["pyro"] for o in obs])
     ctwd = np.array([o["ctwd"] for o in obs])
     print(f"scanner MAE:  {np.nanmean(np.abs(scan - H_in)):.3f} mm (vs H the scanner sees)")
-    print(f"pyro MAE:     {np.mean(np.abs(pyro - T_true)):.1f} °C")
+    print(f"pyro MAE:     {np.mean(np.abs(pyro - T_true)):.1f} C")
     print(f"CTWD MAE:     {np.mean(np.abs(ctwd - s_true)):.3f} mm "
           f"(standoff range {s_true.min():.1f}-{s_true.max():.1f} mm)")
 

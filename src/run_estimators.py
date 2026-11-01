@@ -1,9 +1,4 @@
-"""
-smoke test for the three estimators: naive, EKF, learned.
-
-trains the learned model on a diverse set of builds, then runs all three on
-one held-out (dwell, seed) and compares RMSE on H, standoff, T
-"""
+"""Compare estimators on a fixed-speed build with a held-out seed."""
 
 import io
 import sys
@@ -21,7 +16,7 @@ from ekf import EKF
 from learned import Learned, train_models
 
 
-OUT = Path(__file__).resolve().parents[1] / "reports" / "stopA_sim"
+OUT = Path(__file__).resolve().parents[1] / "reports" / "experiments"
 OUT.mkdir(parents=True, exist_ok=True)
 
 
@@ -34,7 +29,7 @@ def run_one(n_layers, dwell, seed, est_builder):
     prev_H = 0.0
     for r in rows:
         obs = observe(r, prev_H, state)
-        ctrl = {"wfs": WFS_CMD, "ts": TS_CMD, "r_z": R_Z_CMD, "dwell": dwell}
+        ctrl = {"wfs": WFS_CMD, "ts": TS_CMD, "r_z": r["r_z"], "dwell": dwell}
         estimates.append(est.update(obs, ctrl))
         prev_H = r["H_out"]
     return rows, estimates
@@ -66,7 +61,7 @@ def plot_all(rows, by_name):
         "T":        np.array([r["T_out"] for r in rows]),
         "standoff": np.array([r["standoff"] for r in rows]),
     }
-    labels = {"H": "wall top (mm)", "T": "T (°C)", "standoff": "standoff (mm)"}
+    labels = {"H": "wall top (mm)", "T": "T (C)", "standoff": "standoff (mm)"}
     colors = {"naive": "C3", "EKF": "C0", "learned": "C2"}
 
     fig, ax = plt.subplots(1, 3, figsize=(14, 4.2))
@@ -89,17 +84,8 @@ def plot_all(rows, by_name):
 
 
 if __name__ == "__main__":
-    # training set for the learned model: a spread of dwells and seeds. keep
-    # it out of the held-out seed below
-    train_builds = [
-        (d, s)
-        for d in (0, 30, 60, 120, 240)
-        for s in range(10, 14)
-    ]
-    print(f"training learned model on {len(train_builds)} builds...")
-    t0 = time.time()
-    models = train_models(train_builds)
-    print(f"  took {time.time() - t0:.1f} s")
+    print('Training models on independent builds...')
+    models = train_models()
 
     # held-out test case
     n_layers, dwell, seed = 31, 60, 1

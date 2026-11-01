@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-COLORS = {"naive": "C3", "EKF": "C0", "learned": "C2", "oracle": "k"}
+COLORS = {"naive": "C3", "EKF": "C0", "learned": "C2", "reference": "k", "schedule_only": "C4"}
 N_BOOT = 400
 
 
@@ -47,9 +47,10 @@ def plot_crossover(df, metric, ylabel, out_path):
                 color = COLORS.get(name, None)
                 a.plot(xs, meds, marker="o", color=color, label=name, lw=1.6)
                 a.fill_between(xs, los, his, color=color, alpha=0.18)
-            a.set_title(f"error={et}, gain={g}")
+            label = {"width_temperature": "Width-temperature slope", "cooling_time": "Base cooling time", "ctwd_curve": "CTWD curve"}.get(et, et)
+            a.set_title(f"{label} | gain {g}")
             if i == len(gains) - 1:
-                a.set_xlabel("planted error level")
+                a.set_xlabel("Relative parameter change")
             if j == 0:
                 a.set_ylabel(ylabel)
             a.grid(alpha=0.3)
